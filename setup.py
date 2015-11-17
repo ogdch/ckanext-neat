@@ -80,6 +80,8 @@ setup(
     entry_points='''
         [ckan.plugins]
         neat=ckanext.neat.plugin:NeatPlugin
+        [paste.paster_command]
+        neat=ckanext.neat.commands:NeatCommand
 	[babel.extractors]
 	ckan = ckan.lib.extract:extract_ckan
     ''',
