@@ -135,58 +135,71 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
             print "Argument 'path' must be set"
             self.helpCmd()
             sys.exit(1)
-        for root, dirs, files in os.walk(path):
-            for dir_name in dirs:
-                dir_path = os.path.join(root, dir_name)
-                print "dir_path: %s" % dir_path
-                for file_name in os.listdir(dir_path):
-                    file_path = os.path.join(dir_path, file_name)
-                    if file_path.endswith('.pdf') and os.path.isfile(file_path):
+        
+        try:
+            for root, dirs, files in os.walk(path):
+                for dir_name in dirs:
+                    dir_path = os.path.join(root, dir_name)
+                    print "dir_path: %s" % dir_path
+                    for file_name in os.listdir(dir_path):
                         base_name = file_name.split('.')[0]
                         meta_xml = os.path.join(dir_path, base_name + '.xml')
                         metadata = self._parse_metadata(meta_xml)
+                        pkg = self._create_or_update_package(file_name, base_name, dir_path, metadata)
+                        if pkg is not None:
+                            file_path = os.path.join(root, file_name)
+                            self._attach_file(pkg['id'], file_name, file_name, file_path, metadata, 'PDF')
+                            self._attach_file(pkg['id'], base_name + '.xml', 'Metadata XML', meta_xml, format='XML')
+        except Exception, e:
+            print "Exception: %s" % str(e)
+            
 
-                        pkg_name = munge_name(base_name)
-                        extras_list = []
-                        for key, value in metadata.iteritems():
-                            extras_list.append({'key': key, 'value': value})
-                        pkg_dict = {
-                            'name': pkg_name,
-                            'title': base_name,
-                            'extras': extras_list,
-                        }
-                        try:
-                            print "pkg_name: %s" % pkg_name
-                            pkg = self.ckan.action.package_show(id=pkg_name)
-                            self.ckan.call_action('package_update', pkg_dict)
-                        except ckanapi.NotFound:
-                            pkg = self.ckan.call_action('package_create', pkg_dict)
+    def _create_or_update_package(self, file_name, base_name, dir_path, metadata):
+        file_path = os.path.join(dir_path, file_name)
+        if not file_path.endswith('.pdf') or not os.path.isfile(file_path):
+            return None
 
-                        resource_dict = {
-                            'package_id': pkg['id'],
-                            'name': file_name,
-                            'title': file_name,
-                        }
-                        resource_dict.update(metadata)
+        pkg_name = munge_name(base_name)
+        extras_list = self._generate_extras(metadata)
+        pkg_dict = {
+            'name': pkg_name,
+            'title': base_name,
+            'notes': metadata.get('doc_excerpt', None),
+            'extras': extras_list,
+        }
+        try:
+            print "pkg_name: %s" % pkg_name
+            pkg = self.ckan.action.package_show(id=pkg_name)
+            pkg.update(pkg_dict)
+            self.ckan.call_action('package_update', pkg)
+        except ckanapi.NotFound:
+            pkg = self.ckan.call_action('package_create', pkg_dict)
 
-                        self.ckan.call_action(
-                            'resource_create', 
-                            resource_dict,
-                            files={'upload': open(file_path)}
-                        )
+        return pkg
 
-                        # attach the metadata file if it exists
-                        if os.path.isfile(meta_xml):
-                            metadata_file_dict = {
-                                'package_id': pkg['id'],
-                                'name': base_name + '.xml',
-                                'title': 'Metadata XML',
-                            }
-                            self.ckan.call_action(
-                                'resource_create', 
-                                metadata_file_dict,
-                                files={'upload': open(meta_xml)}
-                            )
+    def _generate_extras(self, data_dict):
+        extras_list = []
+        for key, value in data_dict.iteritems():
+            extras_list.append({'key': key, 'value': value})
+        return extras_list
+
+    def _attach_file(self, pkg_id, name, title, file_path, metadata={}, format=None):
+        if not os.path.isfile(file_path):
+            return
+
+        resource_dict = {
+            'package_id': pkg_id,
+            'name': name,
+            'title': name,
+            'format': format,
+        }
+        resource_dict.update(metadata)
+
+        self.ckan.call_action(
+            'resource_create', 
+            resource_dict,
+            files={'upload': open(file_path)}
+        )
 
     def _parse_metadata(self, xml_path):
         if not os.path.isfile(xml_path):
