@@ -147,7 +147,7 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
                         metadata = self._parse_metadata(meta_xml)
                         pkg = self._create_or_update_package(file_name, base_name, dir_path, metadata)
                         if pkg is not None:
-                            file_path = os.path.join(root, file_name)
+                            file_path = os.path.join(dir_path, file_name)
                             self._attach_file(pkg['id'], file_name, file_name, file_path, metadata, 'PDF')
                             self._attach_file(pkg['id'], base_name + '.xml', 'Metadata XML', meta_xml, format='XML')
         except Exception, e:
