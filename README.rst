@@ -41,8 +41,7 @@ ckanext-neat
 Requirements
 ------------
 
-For example, you might want to mention here which versions of CKAN this
-extension works with.
+This extension needs `ckanext-fulltext` with a correctly setup Tika parser.
 
 
 ------------

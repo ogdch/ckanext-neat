@@ -2,12 +2,15 @@ import logging
 import sys
 import os
 import shutil
+import traceback
 from lxml import etree
 from pprint import pprint
 import ckan.lib.cli
 from ckan.lib.munge import munge_name
 import ckanapi
 from ckanapi.errors import CKANAPIError
+from ckanext.fulltext.parser.tikaparser import Tika_Wrapper_Singleton
+
 
 namespaces = {
     'dc': 'http://purl.org/dc/elements/1.1/',
@@ -92,6 +95,7 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
 
     def command(self):
         self._load_config()
+        self.tika_parser = Tika_Wrapper_Singleton()
 
         options = {
             'show': self.showCmd,
@@ -109,7 +113,7 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
         print self.__doc__
 
     def _ckan_connect(self):
-        return MyLocalCKAN(username='admin')
+        return MyLocalCKAN(context={'user': 'admin', 'minimal': True})
         # return ckanapi.RemoteCKAN('http://neat.lo',
         #                     apikey='df3163fc-da37-4c8a-a8b7-f1c22bbeda58')
 
@@ -136,30 +140,31 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
             self.helpCmd()
             sys.exit(1)
         
-        try:
-            for root, dirs, files in os.walk(path):
-                for dir_name in dirs:
+        for root, dirs, files in os.walk(path):
+            for dir_name in dirs:
+                try:
                     dir_path = os.path.join(root, dir_name)
                     print "dir_path: %s" % dir_path
                     for file_name in os.listdir(dir_path):
+                        file_path = os.path.join(dir_path, file_name)
+                        if not file_path.endswith('.pdf') or not os.path.isfile(file_path):
+                            continue
+
                         base_name = file_name.split('.')[0]
-                        meta_xml = os.path.join(dir_path, base_name + '.xml')
-                        metadata = self._parse_metadata(meta_xml)
-                        pkg = self._create_or_update_package(file_name, base_name, dir_path, metadata)
-                        if pkg is not None:
-                            file_path = os.path.join(dir_path, file_name)
-                            self._attach_file(pkg['id'], file_name, file_name, file_path, metadata, 'PDF')
-                            self._attach_file(pkg['id'], base_name + '.xml', 'Metadata XML', meta_xml, format='XML')
-        except Exception, e:
-            print "Exception: %s" % str(e)
+                        meta_xml_path = os.path.join(dir_path, base_name + '.xml')
+                        metadata = self._parse_metadata(meta_xml_path)
+
+                        metadata['full_text_search'] = self.tika_parser.parse_with_tika(file_path)
+                        print "FULLTEXT: %s" % metadata['full_text_search']
+                        pkg = self._create_or_update_package(base_name, metadata)
+                        self._attach_file(pkg['id'], file_name, file_name, file_path, metadata, 'PDF')
+                        self._attach_file(pkg['id'], base_name + '.xml', 'Metadata XML', meta_xml_path, format='XML')
+                except Exception, e:
+                    traceback.print_exc()
             
 
-    def _create_or_update_package(self, file_name, base_name, dir_path, metadata):
-        file_path = os.path.join(dir_path, file_name)
-        if not file_path.endswith('.pdf') or not os.path.isfile(file_path):
-            return None
-
-        pkg_name = munge_name(base_name)
+    def _create_or_update_package(self, base_name, metadata):
+        pkg_name = munge_name(base_name.replace('#', '_'))
         extras_list = self._generate_extras(metadata)
         pkg_dict = {
             'name': pkg_name,
@@ -167,6 +172,7 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
             'notes': metadata.get('doc_excerpt', None),
             'extras': extras_list,
         }
+        pprint(pkg_dict)
         try:
             print "pkg_name: %s" % pkg_name
             pkg = self.ckan.action.package_show(id=pkg_name)
@@ -193,7 +199,6 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
             'title': name,
             'format': format,
         }
-        resource_dict.update(metadata)
 
         self.ckan.call_action(
             'resource_create', 
