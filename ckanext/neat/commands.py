@@ -191,6 +191,7 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
             'maintainer': metadata.get('publisher', None),
             'author': metadata.get('creator', None),
             'extras': extras_list,
+            'resources': [],
         }
         pprint(pkg_dict)
         try:
