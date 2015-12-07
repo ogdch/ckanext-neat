@@ -6,7 +6,7 @@ import traceback
 from lxml import etree
 from pprint import pprint
 import ckan.lib.cli
-from ckan.lib.munge import munge_name
+from ckan.lib.munge import munge_name, munge_tag
 import ckanapi
 from ckanapi.errors import CKANAPIError
 from ckanext.fulltext.parser.tikaparser import Tika_Wrapper_Singleton
@@ -106,14 +106,14 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
         try:
             cmd = self.args[0]
             options[cmd](*self.args[1:])
-        except KeyError:
+        except (IndexError, KeyError):
             self.helpCmd()
 
     def helpCmd(self):
         print self.__doc__
 
     def _ckan_connect(self):
-        return MyLocalCKAN(context={'user': 'admin', 'minimal': True})
+        return MyLocalCKAN(context={'user': 'admin'})
         # return ckanapi.RemoteCKAN('http://neat.lo',
         #                     apikey='df3163fc-da37-4c8a-a8b7-f1c22bbeda58')
 
@@ -152,10 +152,27 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
 
                         base_name = file_name.split('.')[0]
                         meta_xml_path = os.path.join(dir_path, base_name + '.xml')
+
                         metadata = self._parse_metadata(meta_xml_path)
 
+                        # read fulltext with tika
                         metadata['full_text_search'] = self.tika_parser.parse_with_tika(file_path)
                         print "FULLTEXT: %s" % metadata['full_text_search']
+
+                        # add tags to structure
+                        tags = [
+                            metadata.get('source', '').replace('#', ' ').replace('-', ' '),
+                            metadata.get('contributor'),
+                            metadata.get('creator'),
+                            metadata.get('publisher'),
+                            metadata.get('pdf_image_color_mode'),
+                            metadata.get('pdf_image_color_space'),
+                            metadata.get('pdf_image_format'),
+                            metadata.get('pdf_image_resolution'),
+                        ]
+                        tags = [munge_tag(tag) for tag in tags if tag and tag is not None]
+                        metadata['tags'] = [{'name': tag} for tag in set(tags)]
+                        
                         pkg = self._create_or_update_package(base_name, metadata)
                         self._attach_file(pkg['id'], file_name, file_name, file_path, metadata, 'PDF')
                         self._attach_file(pkg['id'], base_name + '.xml', 'Metadata XML', meta_xml_path, format='XML')
@@ -167,9 +184,12 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
         pkg_name = munge_name(base_name.replace('#', '_'))
         extras_list = self._generate_extras(metadata)
         pkg_dict = {
-            'name': pkg_name,
-            'title': base_name,
+            'name':  pkg_name,
+            'title': metadata.get('title', base_name),
             'notes': metadata.get('doc_excerpt', None),
+            'tags': metadata.get('tags', None),
+            'maintainer': metadata.get('publisher', None),
+            'author': metadata.get('creator', None),
             'extras': extras_list,
         }
         pprint(pkg_dict)
@@ -184,9 +204,18 @@ class NeatCommand(ckan.lib.cli.CkanCommand):
         return pkg
 
     def _generate_extras(self, data_dict):
+        core_fields = [
+            'name',
+            'title',
+            'tags',
+            'maintainer',
+            'author',
+            'notes',
+        ]
         extras_list = []
         for key, value in data_dict.iteritems():
-            extras_list.append({'key': key, 'value': value})
+            if key not in core_fields:
+                extras_list.append({'key': key, 'value': value})
         return extras_list
 
     def _attach_file(self, pkg_id, name, title, file_path, metadata={}, format=None):
